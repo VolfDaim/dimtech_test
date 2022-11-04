@@ -1,42 +1,36 @@
-
-import sqlmodel
-from aiopg import create_pool
 from databases import Database
 from sanic import Sanic
 from environs import Env
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from project.settings import Settings
+from project.middleware import setup_middlewares
+from project.routes import setup_routes
 
 app = Sanic("DimaTechTestApp")
-app.extend()
+
+bind = create_async_engine('postgresql+asyncpg://postgres:123@localhost:5432/postgres', echo=True)
+
 
 def database():
-    @app.listener('before_server_start')
-    async def connect_to_db(app,loop):
-        conn = "postgresql://postgres:123@localhost:5432/postgres"
-        app.config['pool'] = await create_pool(
-            dsn=conn,
-            min_size=10,  # in bytes,
-            max_size=10,  # in bytes,
-            max_queries=50000,
-            max_inactive_connection_lifetime=300,
-            loop=loop)
+    app.ctx.db = Database('postgresql://postgres:123@localhost:5432/postgres')
+
+    @app.listener('after_server_start')
+    async def connect_to_db(app, loop):
+        await app.ctx.db.connect()
 
     @app.listener('after_server_stop')
     async def diconnect_from_db(*args, **kwargs):
-        await app.db.disconnect()
+        await app.ctx.db.disconnect()
 
 
-def init():
-    env = Env()
-    env.read_env()
+env = Env()
+env.read_env()
 
-    app.config.from_object(Settings)
-    database()
-    app.run(
-        host=app.config.HOST,
-        port=app.config.PORT,
-        debug=app.config.DEBUG,
-        auto_reload=app.config.DEBUG,
-    )
+app.config.DEBUG = True
+app.config.HOST = '0.0.0.0'
+app.config.PORT = 8000
+app.config.DB_URL = 'postgresql://postgres:123@localhost:5432/postgres'
+
+database()
+setup_routes(app, bind)
+setup_middlewares(app, bind)
